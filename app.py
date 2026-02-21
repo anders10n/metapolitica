@@ -17,18 +17,47 @@ def carregar_dados():
     if not os.path.exists(nome_arquivo):
         st.error(f"Erro: O arquivo '{nome_arquivo}' não foi encontrado.")
         st.info("Certifique-se de que o terminal foi aberto na mesma pasta onde o arquivo CSV está salvo.")
-        return pd.DataFrame() # Retorna vazio para não travar o painel
+        return pd.DataFrame() 
         
-    df = pd.read_csv(nome_arquivo)
+    # LEITURA INTELIGENTE: Tenta múltiplos separadores e codificações para driblar o Excel brasileiro
+    try:
+        # Tenta o padrão original (vírgula)
+        df = pd.read_csv(nome_arquivo, sep=',', on_bad_lines='skip', encoding='utf-8')
+        df.columns = df.columns.str.strip() # Limpa espaços em branco invisíveis nos nomes das colunas
+        
+        # Se não achou a coluna, o Excel provavelmente salvou com ponto e vírgula
+        if 'anoassinatura' not in df.columns:
+            df = pd.read_csv(nome_arquivo, sep=';', on_bad_lines='skip', encoding='utf-8')
+            df.columns = df.columns.str.strip()
+            
+            # Se ainda assim falhar, tenta com a codificação nativa do Windows
+            if 'anoassinatura' not in df.columns:
+                df = pd.read_csv(nome_arquivo, sep=';', on_bad_lines='skip', encoding='latin1')
+                df.columns = df.columns.str.strip()
+                
+    except Exception as e:
+        st.error(f"Erro ao ler o CSV: {e}")
+        return pd.DataFrame()
+
+    # Se mesmo após todas as tentativas a coluna não existir, avisa o usuário
+    if 'anoassinatura' not in df.columns:
+        st.error("Erro crítico: A coluna 'anoassinatura' não foi encontrada no arquivo.")
+        st.warning(f"As colunas que o Python conseguiu ler foram: {list(df.columns)}")
+        return pd.DataFrame()
+
+    # Limpeza e conversões
     df['anoassinatura'] = pd.to_numeric(df['anoassinatura'], errors='coerce')
     df = df[(df['anoassinatura'] >= 1988) & (df['anoassinatura'] <= 2025)].copy()
+    
+    # Tratando colunas para evitar erros de formatação
     df['competencia_exclusiva'] = df['competencia_exclusiva'].astype(str).str.strip().str.lower()
     df['is_simbolica'] = df['simbólica'].isin(['sim', 'Pensão'])
+    
     return df
 
 df_leis = carregar_dados()
 
-# O painel só é renderizado se os dados existirem (passou na trava de segurança)
+# O painel só é renderizado se os dados existirem
 if not df_leis.empty:
     # ==========================================
     # BARRA LATERAL (MENU DE FILTROS)
@@ -85,7 +114,6 @@ if not df_leis.empty:
         st.divider()
 
         # --- GRÁFICOS ---
-        # Criando 2 colunas para colocar os gráficos lado a lado
         graf_col1, graf_col2 = st.columns(2)
 
         with graf_col1:
